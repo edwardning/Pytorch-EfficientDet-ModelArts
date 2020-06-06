@@ -1,6 +1,6 @@
-# original author: signatrix
-# adapted from https://github.com/signatrix/efficientdet/blob/master/train.py
-# modified by Zylo117
+# original author: Zylo117
+# adapted from https://github.com/zylo117/Yet-Another-EfficientDet-Pytorch/train.py
+# modified by edwardning
 
 import datetime
 import os
@@ -14,18 +14,23 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from efficientdet.dataset import CocoDataset, Resizer, Normalizer, Augmenter, collater
 from backbone import EfficientDetBackbone
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
 import numpy as np
 from tqdm.autonotebook import tqdm
 
 from efficientdet.loss import FocalLoss
 from utils.sync_batchnorm import patch_replication_callback
 from utils.utils import replace_w_sync_bn, CustomDataParallel, get_last_weights, init_weights
-
+try:
+    import moxing as mox
+    PLATFORM = 'ModelArts'
+except:
+    PLATFORM = 'Local'
+    print('training on local device')
 
 class Params:
     def __init__(self, project_file):
-        self.params = yaml.safe_load(open(project_file).read())
+        self.params = yaml.safe_load(open(project_file, encoding='utf-8').read())
 
     def __getattr__(self, item):
         return self.params.get(item, None)
@@ -33,11 +38,11 @@ class Params:
 
 def get_args():
     parser = argparse.ArgumentParser('Yet Another EfficientDet Pytorch: SOTA object detection network - Zylo117')
-    parser.add_argument('-p', '--project', type=str, default='coco', help='project file that contains parameters')
+    parser.add_argument('-p', '--project', type=str, default='PEM', help='project file that contains parameters')
     parser.add_argument('-c', '--compound_coef', type=int, default=0, help='coefficients of efficientdet')
-    parser.add_argument('-n', '--num_workers', type=int, default=12, help='num_workers of dataloader')
-    parser.add_argument('--batch_size', type=int, default=12, help='The number of images per batch among all devices')
-    parser.add_argument('--head_only', type=boolean_string, default=False,
+    parser.add_argument('-n', '--num_workers', type=int, default=0, help='num_workers of dataloader')
+    parser.add_argument('--batch_size', type=int, default=1, help='The number of images per batch among all devices')
+    parser.add_argument('--head_only', type=boolean_string, default=True,
                         help='whether finetunes only the regressor and the classifier, '
                              'useful in early stage convergence or small/easy dataset')
     parser.add_argument('--lr', type=float, default=1e-4)
@@ -58,8 +63,61 @@ def get_args():
     parser.add_argument('--saved_path', type=str, default='logs/')
     parser.add_argument('--debug', type=boolean_string, default=False, help='whether visualize the predicted boxes of training, '
                                                                   'the output images will be in test/')
+    # args used in ModelArts
+    parser.add_argument('--local_data_root', default='/cache/', type=str,
+                        help='a directory used for transfer data between local path and OBS path')
+    parser.add_argument('--data_url', default=None, type=str, help='data(zipped) path on OBS')
+    parser.add_argument('--data_local', default='/cache/datasets', type=str, help='data path on local')
+    parser.add_argument('--train_url', default=None, type=str, help='output path on local')
+    parser.add_argument('--train_local', default='', type=str, help='output path on OBS')
+    parser.add_argument("--pretrained_weights", type=str, help="if specified starts from checkpoint model")
+    parser.add_argument('--init_method', default='', type=str, help='the training output results on local')
 
     args = parser.parse_args()
+    return args
+
+
+def prepare_data_on_modelarts(args):
+    """
+    将OBS上的数据拷贝到ModelArts中
+
+    拷贝预训练参数文件
+
+    默认使用ModelArts中的如下路径用于存储数据：
+    1) /cache/model: 如果使用预训练模型，存储从OBS拷贝过来的预训练模型
+    2）/cache/datasets: 存储从OBS拷贝过来的训练数据
+    3）/cache/log: 存储训练日志和训练模型，并且在训练结束后，该目录下的内容会被全部拷贝到OBS
+       /cache/log/logs/ 存放训练结果
+       /cache/log/models/ 存放保存的模型
+    """
+
+    # 1) 拷贝预训练模型
+    if args.pretrained_weights:
+        _, weights_name = os.path.split(args.pretrained_weights)
+        args.load_weights = os.path.join(args.local_data_root, 'model/' + weights_name)
+        mox.file.copy(args.pretrained_weights, args.load_weights)
+        print("预训练模型地址为:", args.load_weights)
+    else:
+        print("不适用预训练模型（从头训练）")
+
+    # 2）拷贝数据
+    if not (args.data_url.startswith('s3://') or args.data_url.startswith('obs://')):
+        print("OBS地址格式出错（s3://桶名//文件or文件夹）")
+    else:
+        args.data_local = os.path.join(args.local_data_root, 'datasets/')
+        cache_path = os.path.join(args.data_local, os.path.basename(args.data_url.strip('/')))
+        mox.file.copy_parallel(args.data_url, cache_path)
+
+        args.data_path = args.data_local
+        print("数据集地址为:", cache_path)
+
+    # 3）训练日志及结果
+    if not (args.train_url.startswith('s3://') or args.train_url.startswith('obs://')):
+        args.train_local = args.train_url
+    else:
+        args.log_path = os.path.join(args.local_data_root, 'log/logs')
+        args.saved_path = os.path.join(args.local_data_root, 'log/models')
+
     return args
 
 
@@ -87,7 +145,7 @@ class ModelWithLoss(nn.Module):
 
 
 def train(opt):
-    params = Params(f'projects/{opt.project}.yml')
+    params = Params(os.path.join(os.path.dirname(__file__), f'projects/{opt.project}.yml'))
 
     if params.num_gpus == 0:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
@@ -178,7 +236,7 @@ def train(opt):
     else:
         use_sync_bn = False
 
-    writer = SummaryWriter(opt.log_path + f'/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}/')
+    # writer = SummaryWriter(opt.log_path + f'/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}/')
 
     # warp the model with loss function, to reduce the memory usage on gpu0 and speedup
     model = ModelWithLoss(model, debug=opt.debug)
@@ -212,10 +270,10 @@ def train(opt):
                 continue
 
             epoch_loss = []
-            progress_bar = tqdm(training_generator)
-            for iter, data in enumerate(progress_bar):
+            # progress_bar = tqdm(training_generator)
+            for iter, data in enumerate(training_generator):
                 if iter < step - last_epoch * num_iter_per_epoch:
-                    progress_bar.update()
+                    # progress_bar.update()
                     continue
                 try:
                     imgs = data['img']
@@ -242,17 +300,21 @@ def train(opt):
 
                     epoch_loss.append(float(loss))
 
-                    progress_bar.set_description(
+                    # progress_bar.set_description(
+                    #    'Step: {}. Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Total loss: {:.5f}'.format(
+                    #        step, epoch, opt.num_epochs, iter + 1, num_iter_per_epoch, cls_loss.item(),
+                    #        reg_loss.item(), loss.item()))
+                    print(
                         'Step: {}. Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Total loss: {:.5f}'.format(
                             step, epoch, opt.num_epochs, iter + 1, num_iter_per_epoch, cls_loss.item(),
                             reg_loss.item(), loss.item()))
-                    writer.add_scalars('Loss', {'train': loss}, step)
-                    writer.add_scalars('Regression_loss', {'train': reg_loss}, step)
-                    writer.add_scalars('Classfication_loss', {'train': cls_loss}, step)
+                    #writer.add_scalars('Loss', {'train': loss}, step)
+                    #writer.add_scalars('Regression_loss', {'train': reg_loss}, step)
+                    #writer.add_scalars('Classfication_loss', {'train': cls_loss}, step)
 
                     # log learning_rate
-                    current_lr = optimizer.param_groups[0]['lr']
-                    writer.add_scalar('learning_rate', current_lr, step)
+                    # current_lr = optimizer.param_groups[0]['lr']
+                    # writer.add_scalar('learning_rate', current_lr, step)
 
                     step += 1
 
@@ -295,11 +357,11 @@ def train(opt):
                 loss = cls_loss + reg_loss
 
                 print(
-                    'Val. Epoch: {}/{}. Classification loss: {:1.5f}. Regression loss: {:1.5f}. Total loss: {:1.5f}'.format(
+                    'Val. Epoch: {}/{}. Classification loss: {:1.5f}. Regression loss: {:1.5f}. Total loss: {:1.5f} \n'.format(
                         epoch, opt.num_epochs, cls_loss, reg_loss, loss))
-                writer.add_scalars('Loss', {'val': loss}, step)
-                writer.add_scalars('Regression_loss', {'val': reg_loss}, step)
-                writer.add_scalars('Classfication_loss', {'val': cls_loss}, step)
+                # writer.add_scalars('Loss', {'val': loss}, step)
+                # writer.add_scalars('Regression_loss', {'val': reg_loss}, step)
+                # writer.add_scalars('Classfication_loss', {'val': cls_loss}, step)
 
                 if loss + opt.es_min_delta < best_loss:
                     best_loss = loss
@@ -315,17 +377,21 @@ def train(opt):
                     break
     except KeyboardInterrupt:
         save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth')
-        writer.close()
-    writer.close()
+        # writer.close()
+    # writer.close()
 
 
 def save_checkpoint(model, name):
     if isinstance(model, CustomDataParallel):
         torch.save(model.module.model.state_dict(), os.path.join(opt.saved_path, name))
+        mox.file.copy(os.path.join(opt.saved_path, name), os.path.join(opt.train_url, name))
     else:
         torch.save(model.model.state_dict(), os.path.join(opt.saved_path, name))
+        mox.file.copy(os.path.join(opt.saved_path, name), os.path.join(opt.train_url, name))
 
 
 if __name__ == '__main__':
     opt = get_args()
+    if PLATFORM == 'ModelArts':
+        opt = prepare_data_on_modelarts(opt)
     train(opt)
