@@ -128,7 +128,7 @@ class ObjectDetectionService():
         self.input_image_key = 'images'
         self.anchor_ratios = [(1.0, 1.0), (1.4, 0.7), (0.7, 1.4)]
         self.anchor_scales = [2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)]
-        self.compound_coef = 5
+        self.compound_coef = 0
         self.threshold = 0.5
         self.iou_threshold = 0.5
         self.obj_list = ['一次性快餐盒', '书籍纸张', '充电宝', '剩饭剩菜', '包', '垃圾桶', '塑料器皿', '塑料玩具',
@@ -279,8 +279,8 @@ class ObjectDetectionService():
 
 
 if __name__ == '__main__':
-    img_path = r'C:\Users\edwardning\Desktop\img.png'
-    model_path = r'C:\Users\edwardning\Desktop\efficientdet-d0.pth'
+    img_path = r'\img.png'
+    model_path = r'\models\efficientdet-d0_9_930.pth'
     infer = ObjectDetectionService('', model_path)
     ori_imgs, framed_imgs, framed_metas = preprocess(img_path, max_size=512)
 
