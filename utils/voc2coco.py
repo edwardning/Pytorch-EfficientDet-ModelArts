@@ -40,15 +40,15 @@ import xml.etree.ElementTree as ET
 START_BOUNDING_BOX_ID = 1
 # PRE_DEFINE_CATEGORIES = {}
 # If necessary, pre-define category and its id
-PRE_DEFINE_CATEGORIES = {'一次性快餐盒': 0, '书籍纸张': 1, '充电宝': 2, '剩饭剩菜': 3, '包': 4,
-                         '垃圾桶': 5, '塑料器皿': 6, '塑料玩具': 7, '塑料衣架': 8, '大骨头': 9,
-                         '干电池': 10, '快递纸袋': 11, '插头电线': 12, '旧衣服': 13, '易拉罐': 14,
-                         '枕头': 15, '果皮果肉': 16, '毛绒玩具': 17, '污损塑料': 18, '污损用纸': 19,
-                         '洗护用品': 20, '烟蒂': 21, '牙签': 22, '玻璃器皿': 23, '砧板': 24,
-                         '筷子': 25, '纸盒纸箱': 26, '花盆': 27, '茶叶渣': 28, '菜帮菜叶': 29,
-                         '蛋壳': 30, '调料瓶': 31, '软膏': 32, '过期药物': 33, '酒瓶': 34,
-                         '金属厨具': 35, '金属器皿': 36, '金属食品罐': 37, '锅': 38, '陶瓷器皿': 39,
-                         '鞋': 40, '食用油桶': 41, '饮料瓶': 42, '鱼骨': 43}
+PRE_DEFINE_CATEGORIES = {'一次性快餐盒': 1, '书籍纸张': 2, '充电宝': 3, '剩饭剩菜': 4, '包': 5,
+        '垃圾桶': 6, '塑料器皿': 7, '塑料玩具': 8, '塑料衣架': 9, '大骨头': 10,
+        '干电池': 11, '快递纸袋': 12, '插头电线': 13, '旧衣服': 14, '易拉罐': 15,
+        '枕头': 16, '果皮果肉': 17, '毛绒玩具': 18, '污损塑料': 19, '污损用纸': 20,
+        '洗护用品': 21, '烟蒂': 22, '牙签': 23, '玻璃器皿': 24, '砧板': 25,
+        '筷子': 26, '纸盒纸箱': 27, '花盆': 28, '茶叶渣': 29, '菜帮菜叶': 30,
+        '蛋壳': 31, '调料瓶': 32, '软膏': 33, '过期药物': 34, '酒瓶': 35,
+        '金属厨具': 36, '金属器皿': 37, '金属食品罐': 38, '锅': 39, '陶瓷器皿': 40,
+        '鞋': 41, '食用油桶': 42, '饮料瓶': 43, '鱼骨': 44}
 # note that, PRE_DEFINE_CATEGORIES should be ONE-INDEXED!!!
 
 def get(root, name):
@@ -158,7 +158,7 @@ def voc2coco(data_path, coco_path, val_ratio):
             val_path = os.path.join(coco_path, 'val')
             if not os.path.exists(val_path):
                 os.makedirs(val_path)
-            shutil.move(os.path.join(img_path, v.replace('.xml', '.jpg')),
+            shutil.copy(os.path.join(img_path, v.replace('.xml', '.jpg')),
                         os.path.join(val_path, v.replace('.xml', '.jpg')))
     with open(os.path.join(txt_path, 'train.txt'), 'w') as ft:
         for t in tqdm(train):
@@ -166,7 +166,7 @@ def voc2coco(data_path, coco_path, val_ratio):
             train_path = os.path.join(coco_path, 'train')
             if not os.path.exists(train_path):
                 os.makedirs(train_path)
-            shutil.move(os.path.join(img_path, t.replace('.xml', '.jpg')),
+            shutil.copy(os.path.join(img_path, t.replace('.xml', '.jpg')),
                         os.path.join(train_path, t.replace('.xml', '.jpg')))
 
     print('create json files...')
@@ -181,3 +181,4 @@ if __name__ == '__main__':
     voc_path = r'D:\coding\trainval\VOC2007'
     coco_path = r'D:\coding\PEM'
     voc2coco(voc_path, coco_path, 0.2)
+
