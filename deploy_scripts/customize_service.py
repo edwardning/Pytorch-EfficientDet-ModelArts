@@ -142,7 +142,7 @@ class ObjectDetectionService(PTServingBaseService):
 
         self.model = EfficientDetBackbone(compound_coef=self.compound_coef, num_classes=len(self.obj_list),
                                      ratios=self.anchor_ratios, scales=self.anchor_scales)
-        self.model.load_state_dict(torch.load(self.model_path))
+        self.model.load_state_dict(torch.load(self.model_path, map_location='cpu'))
         self.model.requires_grad_(False)
         self.model.eval()
 
